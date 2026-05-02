@@ -13,11 +13,8 @@ from django.views.decorators.csrf import csrf_exempt
 from twilio.rest import Client
 from .models import Conversation
 
-# FFmpeg path
-os.environ["PATH"] += os.pathsep + r"C:\ffmpeg\bin"
-AudioSegment.converter = r"C:\ffmpeg\bin\ffmpeg.exe"
-AudioSegment.ffmpeg = r"C:\ffmpeg\bin\ffmpeg.exe"
-AudioSegment.ffprobe = r"C:\ffmpeg\bin\ffprobe.exe"
+# FFmpeg is provided by the system (via RAILPACK_DEPLOY_APT_PACKAGES=ffmpeg)
+# No hardcoded paths needed — pydub finds ffmpeg on PATH automatically
 
 # Cloudinary config
 cloudinary.config(
