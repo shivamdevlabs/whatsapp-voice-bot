@@ -13,11 +13,20 @@ from django.views.decorators.csrf import csrf_exempt
 from twilio.rest import Client
 from .models import Conversation
 
-# FFmpeg path
-os.environ["PATH"] += os.pathsep + r"C:\ffmpeg\bin"
-AudioSegment.converter = r"C:\ffmpeg\bin\ffmpeg.exe"
-AudioSegment.ffmpeg = r"C:\ffmpeg\bin\ffmpeg.exe"
-AudioSegment.ffprobe = r"C:\ffmpeg\bin\ffprobe.exe"
+# FFmpeg path — Railway pe automatically milega
+import shutil
+ffmpeg_path = shutil.which("ffmpeg")
+if ffmpeg_path:
+    AudioSegment.converter = ffmpeg_path
+    AudioSegment.ffmpeg = ffmpeg_path
+    ffprobe_path = shutil.which("ffprobe")
+    if ffprobe_path:
+        AudioSegment.ffprobe = ffprobe_path
+else:
+    # Windows local development
+    AudioSegment.converter = r"C:\ffmpeg\bin\ffmpeg.exe"
+    AudioSegment.ffmpeg = r"C:\ffmpeg\bin\ffmpeg.exe"
+    AudioSegment.ffprobe = r"C:\ffmpeg\bin\ffprobe.exe"
 
 # Cloudinary config
 cloudinary.config(
