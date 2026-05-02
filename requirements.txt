@@ -1,0 +1,11 @@
+django
+djangorestframework
+python-dotenv
+mongoengine
+openai-whisper
+cloudinary
+pydub
+gTTS
+twilio
+requests
+gunicorn
