@@ -1,0 +1,12 @@
+# Environment variables - KABHI PUSH MAT KARO!
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Django
+db.sqlite3
+*.log
