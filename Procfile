@@ -1,0 +1,1 @@
+web: gunicorn voicebot.wsgi --log-file -
