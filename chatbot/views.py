@@ -1,11 +1,12 @@
 import os
+import re
 import uuid
 import requests
 import tempfile
 import whisper
+import warnings
 import cloudinary
 import cloudinary.uploader
-from pydub import AudioSegment
 from gtts import gTTS
 from django.conf import settings
 from django.http import HttpResponse
@@ -13,20 +14,7 @@ from django.views.decorators.csrf import csrf_exempt
 from twilio.rest import Client
 from .models import Conversation
 
-# FFmpeg path — Railway pe automatically milega
-import shutil
-ffmpeg_path = shutil.which("ffmpeg")
-if ffmpeg_path:
-    AudioSegment.converter = ffmpeg_path
-    AudioSegment.ffmpeg = ffmpeg_path
-    ffprobe_path = shutil.which("ffprobe")
-    if ffprobe_path:
-        AudioSegment.ffprobe = ffprobe_path
-else:
-    # Windows local development
-    AudioSegment.converter = r"C:\ffmpeg\bin\ffmpeg.exe"
-    AudioSegment.ffmpeg = r"C:\ffmpeg\bin\ffmpeg.exe"
-    AudioSegment.ffprobe = r"C:\ffmpeg\bin\ffprobe.exe"
+warnings.filterwarnings("ignore")
 
 # Cloudinary config
 cloudinary.config(
@@ -35,16 +23,27 @@ cloudinary.config(
     api_secret=settings.CLOUDINARY_API_SECRET
 )
 
-# Whisper model ek baar load karo — startup pe
+# Whisper model ek baar load karo
 print("Loading Whisper model...")
-WHISPER_MODEL = whisper.load_model("tiny")  # tiny = faster than base
+WHISPER_MODEL = whisper.load_model("tiny")
 print("Whisper model loaded!")
+
+
+def clean_response(text):
+    text = text.replace('`', '')
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.*?)\*', r'\1', text)
+    text = re.sub(r'#+ ', '', text)
+    text = ' '.join(text.split())
+    return text
+
 
 @csrf_exempt
 def whatsapp_webhook(request):
     if request.method == 'POST':
+        print("=== POST DATA ===")
+        print(dict(request.POST))
         try:
-            print("=== POST DATA ===")
             from_number = request.POST.get('From', '')
             num_media = int(request.POST.get('NumMedia', 0))
 
@@ -65,12 +64,15 @@ def whatsapp_webhook(request):
                     f.write(audio_response.content)
 
                 user_text = transcribe_audio(temp_audio_path)
-                os.remove(temp_audio_path)
+                try:
+                    os.remove(temp_audio_path)
+                except:
+                    pass
             else:
                 user_text = request.POST.get('Body', '')
 
             if not user_text or user_text.strip() == "":
-                user_text = "Hello"  # Default text agar voice samajh na aaye
+                user_text = "Hello"
 
             print(f"User said: {user_text}")
 
@@ -90,7 +92,6 @@ def whatsapp_webhook(request):
                 print(f"MongoDB save error: {e}")
 
             send_whatsapp_voice(from_number, audio_url, ai_reply)
-
             return HttpResponse("OK", status=200)
 
         except Exception as e:
@@ -99,16 +100,11 @@ def whatsapp_webhook(request):
 
     return HttpResponse("Method not allowed", status=405)
 
-# import warnings
+
 def transcribe_audio(audio_path):
     try:
-        audio = AudioSegment.from_file(audio_path, format="ogg")
-        wav_path = audio_path.replace('.ogg', '.wav')
-        audio.export(wav_path, format='wav')
-        
-        # Ab har baar load nahi hoga — already loaded hai!
-        result = WHISPER_MODEL.transcribe(wav_path, fp16=False)
-        os.remove(wav_path)
+        # Whisper directly ogg handle karta hai — pydub ki zaroorat nahi!
+        result = WHISPER_MODEL.transcribe(audio_path, fp16=False)
         text = result["text"].strip()
         print(f"Transcribed text: {text}")
         return text if text else "Samajh nahi aaya!"
@@ -119,30 +115,36 @@ def transcribe_audio(audio_path):
 
 def get_gemini_reply(user_text):
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
         payload = {
             "contents": [{
                 "parts": [{
                     "text": f"""You are a helpful AI assistant. Detect the language of the user's message and reply in the SAME language.
-                    Rules:
-                    - If user speaks in English → Reply in English (natural, human-like)
-                    - If user speaks in Hindi → Reply in Hindi (pure Hindi words, human touch, warm tone)
-                    - If user speaks in Hinglish → Reply in Hinglish
-                    - Keep reply short — 40-50 sentences only
-                    - Sound like a helpful friend, not a robot
 
-                    User said: {user_text}"""
+Rules:
+- If user speaks in English → Reply in English
+- If user speaks in Hindi → Reply in pure Hindi
+- If user speaks in Hinglish → Reply in Hinglish
+- Keep reply SHORT — maximum 2 sentences only
+- Sound like a helpful friend
+
+User said: {user_text}"""
                 }]
-            }]
+            }],
+            "generationConfig": {
+                "maxOutputTokens": 100,
+                "temperature": 0.7
+            }
         }
         response = requests.post(url, json=payload)
         data = response.json()
         print(f"Gemini raw response: {data}")
 
         if 'candidates' in data:
-            return data['candidates'][0]['content']['parts'][0]['text']
+            reply = data['candidates'][0]['content']['parts'][0]['text']
+            return clean_response(reply)
         else:
-            return "Sorry yaar, AI abhi busy hai — thodi der baad try karo!"
+            return "Sorry yaar, abhi busy hai — thodi der baad try karo!"
     except Exception as e:
         print(f"Gemini error: {e}")
         return "Sorry, kuch gadbad ho gayi!"
@@ -162,7 +164,10 @@ def text_to_voice(text):
             resource_type="video",
             folder="voicebot"
         )
-        os.remove(temp_path)
+        try:
+            os.remove(temp_path)
+        except:
+            pass
         return upload_result['secure_url']
     except Exception as e:
         print(f"TTS error: {e}")
@@ -182,7 +187,6 @@ def send_whatsapp_voice(to_number, audio_url, text_reply):
                 media_url=[audio_url]
             )
         else:
-            # Audio nahi bana toh text bhejo
             client.messages.create(
                 from_='whatsapp:+14155238886',
                 to=to_number,
